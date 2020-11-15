@@ -34,6 +34,22 @@ code {
   background: #ff0000;
 }
 
+.waypoint {
+  border: 1px solid #000000;
+  background: #0000ff;
+  float: left;
+  font-size: 6px;
+  font-weight: bold;
+  line-height: 34px;
+  height: 6px;
+  margin: -3px;
+  padding: 0;
+  text-align: center;
+  width: 6px;
+  border-radius: 50%;
+  position: absolute;
+}
+
 .map {
   width: 100%;
   height: 100%;

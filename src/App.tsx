@@ -7,6 +7,18 @@ function nm_to_px(nm: number) {
   return nm * 5;
 }
 
+function px_to_nm(px: number) {
+  return px / 5;
+}
+
+function degrees_to_radians(degrees: number) {
+  return (degrees * Math.PI) / 180;
+}
+
+function radians_to_degrees(radians: number) {
+  return (radians * 180) / Math.PI;
+}
+
 class Point {
   x: number;
   y: number;
@@ -25,7 +37,7 @@ class Point {
   }
 
   fromHeading(heading: number, distance_nm: number) {
-    let angle = ((heading - 90) * Math.PI) / 180;
+    let angle = degrees_to_radians(heading - 90);
     let distance = nm_to_px(distance_nm);
     return this.translate(
       new Point(Math.cos(angle) * distance, Math.sin(angle) * distance)
@@ -36,8 +48,14 @@ class Point {
     let xdist = other.x - this.x;
     let ydist = other.y - this.y;
     let angle = Math.atan2(ydist, xdist);
-    let heading = angle * (180 / Math.PI) + 90;
+    let heading = radians_to_degrees(angle) + 90;
     return heading;
+  }
+
+  distanceTo(other: Point) {
+    let xdist = other.x - this.x;
+    let ydist = other.y - this.y;
+    return Math.sqrt(Math.pow(xdist, 2) + Math.pow(ydist, 2));
   }
 }
 
@@ -76,6 +94,21 @@ class Map extends React.Component {
   }
 }
 
+interface WaypointDisplayProps {
+  position: Point;
+}
+
+class WaypointDisplay extends React.Component<WaypointDisplayProps> {
+  render() {
+    return (
+      <div
+        className="waypoint"
+        style={{ left: this.props.position.x, top: this.props.position.y }}
+      ></div>
+    );
+  }
+}
+
 interface FlightPlanProps {
   waypoints: Point[];
 }
@@ -87,13 +120,16 @@ class FlightPlanDisplay extends React.Component<FlightPlanProps> {
       .map((waypoint: Point, index: number) => {
         let previous = this.props.waypoints[index];
         return (
-          <Line
-            x0={previous.x}
-            y0={previous.y}
-            x1={waypoint.x}
-            y1={waypoint.y}
-            borderColor="#000"
-          />
+          <div>
+            <WaypointDisplay position={waypoint} />
+            <Line
+              x0={previous.x}
+              y0={previous.y}
+              x1={waypoint.x}
+              y1={waypoint.y}
+              borderColor="#000"
+            />
+          </div>
         );
       });
   }
@@ -106,42 +142,139 @@ class FlightPlan implements FlightPlanProps {
     this.waypoints = waypoints;
   }
 
-  static strike(from: Airbase, to: Airbase) {
-    // Takeoff
-    let waypoints = [from.position];
+  static strike(from: Airbase, to: Airbase, improved: boolean) {
+    if (improved) {
+      return FlightPlan.newStrike(from, to);
+    } else {
+      return FlightPlan.oldStrike(from, to);
+    }
+  }
 
-    // Assume runway heading of 120
-    waypoints.push(from.position.fromHeading(120, 5));
+  static joinPoint(
+    origin: Point,
+    target: Point,
+    ingress: Point,
+    joinDistance: number
+  ) {
+    if (px_to_nm(origin.distanceTo(ingress)) < joinDistance) {
+      // If the ingress point is close to the origin, plan the join point
+      // farther back.
+      return ingress.fromHeading(target.headingTo(origin), joinDistance);
+    } else {
+      return ingress.fromHeading(ingress.headingTo(origin), joinDistance);
+    }
+  }
+
+  static holdPoint(
+    origin: Point,
+    target: Point,
+    join: Point,
+    joinDistance: number
+  ) {
+    const pushDistance = 20;
+    const holdDistance = 15;
+    if (origin.distanceTo(target) < join.distanceTo(target)) {
+      // If the origin airfield is closer to the target than the join point,
+      // plan the hold point such that it retreats from the origin airfield.
+      return join.fromHeading(target.headingTo(origin), pushDistance);
+    }
+    let originJoinDistance = px_to_nm(origin.distanceTo(join));
+    let hold = origin.fromHeading(origin.headingTo(join), holdDistance);
+    if (px_to_nm(hold.distanceTo(join)) < pushDistance) {
+      let headingToJoin = origin.headingTo(join);
+      let thetaRad = Math.acos(
+        (Math.pow(holdDistance, 2) +
+          Math.pow(originJoinDistance, 2) -
+          Math.pow(joinDistance, 2)) /
+          (2 * holdDistance * originJoinDistance)
+      );
+      let theta = radians_to_degrees(thetaRad);
+      if (isNaN(theta)) {
+        // No solution that maintains hold and join distances. Extend the hold
+        // point away from the target.
+        hold = origin.fromHeading(target.headingTo(origin), holdDistance);
+      } else {
+        hold = origin.fromHeading(headingToJoin - theta, holdDistance);
+      }
+    }
+    return hold;
+  }
+
+  static newStrike(from: Airbase, to: Airbase) {
+    const joinDistance = 20;
+    const ingressDistance = 25;
+
+    const origin = from.position;
+    const target = to.position;
+    const airfieldHeading = target.headingTo(origin);
+    const ingress = target.fromHeading(airfieldHeading + 25, ingressDistance);
+    const join = FlightPlan.joinPoint(origin, target, ingress, joinDistance);
+    const egress = target.fromHeading(airfieldHeading - 25, ingressDistance);
+
+    // Takeoff
+    let waypoints = [origin];
 
     // Hold
-    waypoints.push(
-      from.position.fromHeading(from.position.headingTo(to.position), 15)
-    );
-
-    const airfieldHeading = to.position.headingTo(from.position);
-    const ingress = to.position.fromHeading(airfieldHeading + 25, 25);
-    const egress = to.position.fromHeading(airfieldHeading - 25, 25);
+    waypoints.push(FlightPlan.holdPoint(origin, target, join, joinDistance));
 
     // Join
-    waypoints.push(ingress.fromHeading(ingress.headingTo(from.position), 20));
+    waypoints.push(join);
 
     // Ingress
     waypoints.push(ingress);
 
     // Target
-    waypoints.push(to.position);
+    waypoints.push(target);
 
     // Egress
     waypoints.push(egress);
 
     // Split
-    waypoints.push(egress.fromHeading(egress.headingTo(from.position), 20));
-
-    // Descent
-    waypoints.push(from.position.fromHeading(120 + 180, 5));
+    waypoints.push(FlightPlan.joinPoint(origin, target, egress, joinDistance));
 
     // Landing
-    waypoints.push(from.position);
+    waypoints.push(origin);
+    return new this(waypoints);
+  }
+
+  // The planning algorithm currently in DCS liberation.
+  static oldStrike(from: Airbase, to: Airbase) {
+    const origin = from.position;
+    const target = to.position;
+    const airfieldHeading = target.headingTo(origin);
+    const ingress = target.fromHeading(airfieldHeading + 25, 25);
+    const join = ingress.fromHeading(ingress.headingTo(origin), 20);
+    const egress = target.fromHeading(airfieldHeading - 25, 25);
+
+    // Takeoff
+    let waypoints = [origin];
+
+    // Assume runway heading of 120
+    waypoints.push(origin.fromHeading(120, 5));
+
+    // Hold
+    waypoints.push(origin.fromHeading(origin.headingTo(target), 15));
+
+    // Join
+    waypoints.push(join);
+
+    // Ingress
+    waypoints.push(ingress);
+
+    // Target
+    waypoints.push(target);
+
+    // Egress
+    waypoints.push(egress);
+
+    // Split
+    waypoints.push(egress.fromHeading(egress.headingTo(origin), 20));
+
+    // Descent
+    waypoints.push(origin.fromHeading(120 + 180, 5));
+
+    // Landing
+    waypoints.push(origin);
     return new this(waypoints);
   }
 }
@@ -161,10 +294,32 @@ class AirbaseImpl implements Airbase {
   }
 }
 
+interface CheckboxProps {
+  label: string;
+  checked: boolean;
+  onChange: (event: React.FormEvent<HTMLInputElement>) => void;
+}
+
+class Checkbox extends React.Component<CheckboxProps> {
+  render() {
+    return (
+      <form>
+        <label>{this.props.label}</label>
+        <input
+          type="checkbox"
+          checked={this.props.checked}
+          onChange={this.props.onChange}
+        />
+      </form>
+    );
+  }
+}
+
 interface AppState {
   anapa: AirbaseImpl;
   mozdok: AirbaseImpl;
   nalchik: AirbaseImpl;
+  useImprovedPlanner: boolean;
 }
 
 class App extends React.Component<{}, AppState> {
@@ -174,7 +329,15 @@ class App extends React.Component<{}, AppState> {
       anapa: new AirbaseImpl(new Point(nm_to_px(20), nm_to_px(20)), true),
       mozdok: new AirbaseImpl(new Point(nm_to_px(120), nm_to_px(120)), false),
       nalchik: new AirbaseImpl(new Point(nm_to_px(120), nm_to_px(20)), false),
+      useImprovedPlanner: true,
     };
+    this.onPlannerChange = this.onPlannerChange.bind(this);
+  }
+
+  onPlannerChange(event: React.FormEvent<HTMLInputElement>) {
+    this.setState({
+      useImprovedPlanner: event.currentTarget.checked,
+    });
   }
 
   render() {
@@ -209,9 +372,18 @@ class App extends React.Component<{}, AppState> {
             }}
           />
           <FlightPlanDisplay
-            {...FlightPlan.strike(this.state.anapa, this.state.mozdok)}
+            {...FlightPlan.strike(
+              this.state.anapa,
+              this.state.mozdok,
+              this.state.useImprovedPlanner
+            )}
           />
         </Map>
+        <Checkbox
+          label="Use improved planner"
+          checked={this.state.useImprovedPlanner}
+          onChange={this.onPlannerChange}
+        />
       </div>
     );
   }
