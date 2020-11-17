@@ -144,11 +144,16 @@ class FlightPlan implements FlightPlanProps {
 }
 
 interface FlightPlanner {
+  name(): string;
   strike(from: Airbase, to: Airbase): FlightPlan;
 }
 
 // The planning algorithm in DCS Liberation 2.2.0.
 class FlightPlanner220 implements FlightPlanner {
+  name() {
+    return "2.2.0"
+  }
+
   strike(from: Airbase, to: Airbase) {
     const origin = from.position;
     const target = to.position;
@@ -192,6 +197,10 @@ class FlightPlanner220 implements FlightPlanner {
 
 // The planning algorithm in DCS Liberation 2.2.x
 class FlightPlanner22X implements FlightPlanner {
+  name() {
+    return "2.2.x"
+  }
+
   readonly holdDistance: number = 15;
   readonly pushDistance: number = 20;
   readonly joinDistance: number = 20;
@@ -291,22 +300,17 @@ class AirbaseImpl implements Airbase {
   }
 }
 
-interface CheckboxProps {
+interface ComboboxProps {
   label: string;
-  checked: boolean;
-  onChange: (event: React.FormEvent<HTMLInputElement>) => void;
+  onChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
 }
 
-class Checkbox extends React.Component<CheckboxProps> {
+class Combobox extends React.Component<ComboboxProps> {
   render() {
     return (
       <form>
         <label>{this.props.label}</label>
-        <input
-          type="checkbox"
-          checked={this.props.checked}
-          onChange={this.props.onChange}
-        />
+        <select onChange={this.props.onChange}>{this.props.children}</select>
       </form>
     );
   }
@@ -316,33 +320,36 @@ interface AppState {
   anapa: AirbaseImpl;
   mozdok: AirbaseImpl;
   nalchik: AirbaseImpl;
-  useImprovedPlanner: boolean;
+  flightPlannerIndex: number;
 }
 
 class App extends React.Component<{}, AppState> {
+  planners: FlightPlanner[];
+
   constructor(props: {}) {
     super(props);
+    this.planners = [
+      new FlightPlanner220(),
+      new FlightPlanner22X(),
+    ];
+
     this.state = {
       anapa: new AirbaseImpl(new Point(nm_to_px(20), nm_to_px(20)), true),
       mozdok: new AirbaseImpl(new Point(nm_to_px(120), nm_to_px(120)), false),
       nalchik: new AirbaseImpl(new Point(nm_to_px(120), nm_to_px(20)), false),
-      useImprovedPlanner: true,
+      flightPlannerIndex: 0,
     };
     this.onPlannerChange = this.onPlannerChange.bind(this);
   }
 
-  onPlannerChange(event: React.FormEvent<HTMLInputElement>) {
+  onPlannerChange(event: React.ChangeEvent<HTMLSelectElement>) {
     this.setState({
-      useImprovedPlanner: event.currentTarget.checked,
+      flightPlannerIndex: event.currentTarget.selectedIndex,
     });
   }
 
   flightPlanner(): FlightPlanner {
-    if (this.state.useImprovedPlanner) {
-      return new FlightPlanner22X();
-    } else {
-      return new FlightPlanner220();
-    }
+    return this.planners[this.state.flightPlannerIndex];
   }
 
   render() {
@@ -377,17 +384,21 @@ class App extends React.Component<{}, AppState> {
             }}
           />
           <FlightPlanDisplay
-            waypoints={this.flightPlanner().strike(
-              this.state.anapa,
-              this.state.mozdok
-            ).waypoints}
+            waypoints={
+              this.flightPlanner().strike(this.state.anapa, this.state.mozdok)
+                .waypoints
+            }
           />
         </Map>
-        <Checkbox
-          label="Use improved planner"
-          checked={this.state.useImprovedPlanner}
-          onChange={this.onPlannerChange}
-        />
+        <Combobox label="Flight planner" onChange={this.onPlannerChange}>
+          {this.planners.map((planner: FlightPlanner, index: number) => {
+            return (
+              <option selected={index == this.state.flightPlannerIndex}>
+                {planner.name()}
+              </option>
+            );
+          })}
+        </Combobox>
       </div>
     );
   }
