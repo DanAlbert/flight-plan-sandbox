@@ -66,9 +66,9 @@ export class FlightPlanner220 implements FlightPlanner {
 }
 
 // The planning algorithm in DCS Liberation 2.2.x
-export class FlightPlanner22X implements FlightPlanner {
+export class FlightPlanner22XRev1 implements FlightPlanner {
   name() {
-    return "2.2.x";
+    return "2.2.x rev 1";
   }
 
   readonly holdDistance: number = 15;
@@ -76,8 +76,12 @@ export class FlightPlanner22X implements FlightPlanner {
   readonly joinDistance: number = 20;
   readonly ingressDistance: number = 45;
 
+  joinShouldRetreat(origin: Point, target: Point, ingress: Point) {
+    return px_to_nm(origin.distanceTo(ingress)) < this.joinDistance;
+  }
+
   joinPoint(origin: Point, target: Point, ingress: Point) {
-    if (px_to_nm(origin.distanceTo(ingress)) < this.joinDistance) {
+    if (this.joinShouldRetreat(origin, target, ingress)) {
       // If the ingress point is close to the origin, plan the join point
       // farther back.
       return ingress.fromHeading(target.headingTo(origin), this.joinDistance);
@@ -152,5 +156,15 @@ export class FlightPlanner22X implements FlightPlanner {
     // Landing
     waypoints.push(origin);
     return new FlightPlan(waypoints);
+  }
+}
+
+export class FlightPlanner22XRev2 extends FlightPlanner22XRev1 {
+  name() {
+    return "2.2.x rev 2";
+  }
+
+  joinShouldRetreat(origin: Point, target: Point, ingress: Point) {
+    return origin.distanceTo(target) < ingress.distanceTo(target);
   }
 }

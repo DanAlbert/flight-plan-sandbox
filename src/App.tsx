@@ -8,7 +8,8 @@ import {
   FlightPlanProps,
   FlightPlanner,
   FlightPlanner220,
-  FlightPlanner22X,
+  FlightPlanner22XRev1,
+  FlightPlanner22XRev2,
 } from "./planners";
 
 interface AirbaseDisplayProps extends Airbase {
@@ -106,7 +107,11 @@ class App extends React.Component<{}, AppState> {
 
   constructor(props: {}) {
     super(props);
-    this.planners = [new FlightPlanner220(), new FlightPlanner22X()];
+    this.planners = [
+      new FlightPlanner220(),
+      new FlightPlanner22XRev1(),
+      new FlightPlanner22XRev2(),
+    ];
 
     this.state = {
       anapa: new AirbaseImpl(new Point(nm_to_px(20), nm_to_px(20)), true),
