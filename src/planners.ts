@@ -74,7 +74,7 @@ export class FlightPlanner22X implements FlightPlanner {
   readonly holdDistance: number = 15;
   readonly pushDistance: number = 20;
   readonly joinDistance: number = 20;
-  readonly ingressDistance: number = 25;
+  readonly ingressDistance: number = 45;
 
   joinPoint(origin: Point, target: Point, ingress: Point) {
     if (px_to_nm(origin.distanceTo(ingress)) < this.joinDistance) {
