@@ -136,109 +136,20 @@ class FlightPlanDisplay extends React.Component<FlightPlanProps> {
 }
 
 class FlightPlan implements FlightPlanProps {
-  waypoints: Point[];
+  readonly waypoints: Point[];
 
   constructor(waypoints: Point[]) {
     this.waypoints = waypoints;
   }
+}
 
-  static strike(from: Airbase, to: Airbase, improved: boolean) {
-    if (improved) {
-      return FlightPlan.newStrike(from, to);
-    } else {
-      return FlightPlan.oldStrike(from, to);
-    }
-  }
+interface FlightPlanner {
+  strike(from: Airbase, to: Airbase): FlightPlan;
+}
 
-  static joinPoint(
-    origin: Point,
-    target: Point,
-    ingress: Point,
-    joinDistance: number
-  ) {
-    if (px_to_nm(origin.distanceTo(ingress)) < joinDistance) {
-      // If the ingress point is close to the origin, plan the join point
-      // farther back.
-      return ingress.fromHeading(target.headingTo(origin), joinDistance);
-    } else {
-      return ingress.fromHeading(ingress.headingTo(origin), joinDistance);
-    }
-  }
-
-  static holdPoint(
-    origin: Point,
-    target: Point,
-    join: Point,
-    joinDistance: number
-  ) {
-    const pushDistance = 20;
-    const holdDistance = 15;
-    if (origin.distanceTo(target) < join.distanceTo(target)) {
-      // If the origin airfield is closer to the target than the join point,
-      // plan the hold point such that it retreats from the origin airfield.
-      return join.fromHeading(target.headingTo(origin), pushDistance);
-    }
-    let originJoinDistance = px_to_nm(origin.distanceTo(join));
-    let hold = origin.fromHeading(origin.headingTo(join), holdDistance);
-    if (px_to_nm(hold.distanceTo(join)) < pushDistance) {
-      let headingToJoin = origin.headingTo(join);
-      let thetaRad = Math.acos(
-        (Math.pow(holdDistance, 2) +
-          Math.pow(originJoinDistance, 2) -
-          Math.pow(joinDistance, 2)) /
-          (2 * holdDistance * originJoinDistance)
-      );
-      let theta = radians_to_degrees(thetaRad);
-      if (isNaN(theta)) {
-        // No solution that maintains hold and join distances. Extend the hold
-        // point away from the target.
-        hold = origin.fromHeading(target.headingTo(origin), holdDistance);
-      } else {
-        hold = origin.fromHeading(headingToJoin - theta, holdDistance);
-      }
-    }
-    return hold;
-  }
-
-  static newStrike(from: Airbase, to: Airbase) {
-    const joinDistance = 20;
-    const ingressDistance = 25;
-
-    const origin = from.position;
-    const target = to.position;
-    const airfieldHeading = target.headingTo(origin);
-    const ingress = target.fromHeading(airfieldHeading + 25, ingressDistance);
-    const join = FlightPlan.joinPoint(origin, target, ingress, joinDistance);
-    const egress = target.fromHeading(airfieldHeading - 25, ingressDistance);
-
-    // Takeoff
-    let waypoints = [origin];
-
-    // Hold
-    waypoints.push(FlightPlan.holdPoint(origin, target, join, joinDistance));
-
-    // Join
-    waypoints.push(join);
-
-    // Ingress
-    waypoints.push(ingress);
-
-    // Target
-    waypoints.push(target);
-
-    // Egress
-    waypoints.push(egress);
-
-    // Split
-    waypoints.push(FlightPlan.joinPoint(origin, target, egress, joinDistance));
-
-    // Landing
-    waypoints.push(origin);
-    return new this(waypoints);
-  }
-
-  // The planning algorithm currently in DCS liberation.
-  static oldStrike(from: Airbase, to: Airbase) {
+// The planning algorithm in DCS Liberation 2.2.0.
+class FlightPlanner220 implements FlightPlanner {
+  strike(from: Airbase, to: Airbase) {
     const origin = from.position;
     const target = to.position;
     const airfieldHeading = target.headingTo(origin);
@@ -275,7 +186,93 @@ class FlightPlan implements FlightPlanProps {
 
     // Landing
     waypoints.push(origin);
-    return new this(waypoints);
+    return new FlightPlan(waypoints);
+  }
+}
+
+// The planning algorithm in DCS Liberation 2.2.x
+class FlightPlanner22X implements FlightPlanner {
+  readonly holdDistance: number = 15;
+  readonly pushDistance: number = 20;
+  readonly joinDistance: number = 20;
+  readonly ingressDistance: number = 25;
+
+  joinPoint(origin: Point, target: Point, ingress: Point) {
+    if (px_to_nm(origin.distanceTo(ingress)) < this.joinDistance) {
+      // If the ingress point is close to the origin, plan the join point
+      // farther back.
+      return ingress.fromHeading(target.headingTo(origin), this.joinDistance);
+    } else {
+      return ingress.fromHeading(ingress.headingTo(origin), this.joinDistance);
+    }
+  }
+
+  holdPoint(origin: Point, target: Point, join: Point) {
+    if (origin.distanceTo(target) < join.distanceTo(target)) {
+      // If the origin airfield is closer to the target than the join point,
+      // plan the hold point such that it retreats from the origin airfield.
+      return join.fromHeading(target.headingTo(origin), this.pushDistance);
+    }
+    let originJoinDistance = px_to_nm(origin.distanceTo(join));
+    let hold = origin.fromHeading(origin.headingTo(join), this.holdDistance);
+    if (px_to_nm(hold.distanceTo(join)) < this.pushDistance) {
+      let headingToJoin = origin.headingTo(join);
+      let thetaRad = Math.acos(
+        (Math.pow(this.holdDistance, 2) +
+          Math.pow(originJoinDistance, 2) -
+          Math.pow(this.joinDistance, 2)) /
+          (2 * this.holdDistance * originJoinDistance)
+      );
+      let theta = radians_to_degrees(thetaRad);
+      if (isNaN(theta)) {
+        // No solution that maintains hold and join distances. Extend the hold
+        // point away from the target.
+        hold = origin.fromHeading(target.headingTo(origin), this.holdDistance);
+      } else {
+        hold = origin.fromHeading(headingToJoin - theta, this.holdDistance);
+      }
+    }
+    return hold;
+  }
+
+  strike(from: Airbase, to: Airbase) {
+    const origin = from.position;
+    const target = to.position;
+    const airfieldHeading = target.headingTo(origin);
+    const ingress = target.fromHeading(
+      airfieldHeading + 25,
+      this.ingressDistance
+    );
+    const join = this.joinPoint(origin, target, ingress);
+    const egress = target.fromHeading(
+      airfieldHeading - 25,
+      this.ingressDistance
+    );
+
+    // Takeoff
+    let waypoints = [origin];
+
+    // Hold
+    waypoints.push(this.holdPoint(origin, target, join));
+
+    // Join
+    waypoints.push(join);
+
+    // Ingress
+    waypoints.push(ingress);
+
+    // Target
+    waypoints.push(target);
+
+    // Egress
+    waypoints.push(egress);
+
+    // Split
+    waypoints.push(this.joinPoint(origin, target, egress));
+
+    // Landing
+    waypoints.push(origin);
+    return new FlightPlan(waypoints);
   }
 }
 
@@ -340,6 +337,14 @@ class App extends React.Component<{}, AppState> {
     });
   }
 
+  flightPlanner(): FlightPlanner {
+    if (this.state.useImprovedPlanner) {
+      return new FlightPlanner22X();
+    } else {
+      return new FlightPlanner220();
+    }
+  }
+
   render() {
     return (
       <div className="App">
@@ -372,11 +377,10 @@ class App extends React.Component<{}, AppState> {
             }}
           />
           <FlightPlanDisplay
-            {...FlightPlan.strike(
+            waypoints={this.flightPlanner().strike(
               this.state.anapa,
-              this.state.mozdok,
-              this.state.useImprovedPlanner
-            )}
+              this.state.mozdok
+            ).waypoints}
           />
         </Map>
         <Checkbox
